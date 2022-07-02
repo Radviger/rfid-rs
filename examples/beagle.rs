@@ -4,7 +4,7 @@
 //!
 //! - P9.1  = 3V3       = VCC
 //! - P9.3  = GND       = GND
-//! - P9.17 = SPI0_CS0  = NSS  (config-pin P9.17 gpio)
+//! - P9.17 = SPI0_CS0  = NSS  (config-pin P9.17 spi_cs (or gpio))
 //! - P9.18 = SPI0_D1   = MOSI (config-pin P9.18 spi)
 //! - P9.21 = SPI0_D0   = MISO (config-pin P9.21 spi)
 //! - P9.22 = SPI0_SCLK = SCLK (config-pin P9.22 spi_sclk)
@@ -58,6 +58,7 @@ fn main() {
         .build();
     spi.configure(&options).unwrap();
 
+    // in case software controls the chip select (regular GPIO pin)
     let pin = Pin::new(5); // P9.17 is GPIO5
     pin.export().unwrap();
     while !pin.is_exported() {}
@@ -66,7 +67,10 @@ fn main() {
 
     let mut led = Led;
     let mut delay = Delay;
-    let mut mfrc522 = Mfrc522::new(spi, pin).unwrap();
+    // The `new` method assumes the chip select is hardware-controlled.
+    // If you want software chip select (with GPIO5 in this case),
+    // use `Mfrc522::with_nss(spi, pin).unwrap();
+    let mut mfrc522 = Mfrc522::new(spi).unwrap();
 
     let vers = mfrc522.version().unwrap();
 

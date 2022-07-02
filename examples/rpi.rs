@@ -17,8 +17,6 @@ use std::fs::File;
 use std::io::Write;
 
 use embedded_hal::blocking::delay::DelayMs;
-use embedded_hal::blocking::spi::{Transfer as SpiTransfer, Write as SpiWrite};
-use embedded_hal::digital::v2::OutputPin;
 use hal::spidev::{SpiModeFlags, SpidevOptions};
 use hal::sysfs_gpio::Direction;
 use hal::{Delay, Pin, Spidev};
@@ -71,7 +69,9 @@ fn main() {
     pin.set_direction(Direction::Out).unwrap();
     pin.set_value(1).unwrap();
 
-    let mut mfrc522 = Mfrc522::new(spi, pin).unwrap();
+    // The `with_nss` method provides a GPIO pin to the driver for software controlled chip select.
+    // If you want hardware chip select use `Mfrc522::new(spi).unwrap();
+    let mut mfrc522 = Mfrc522::with_nss(spi, pin).unwrap();
 
     let vers = mfrc522.version().unwrap();
 
