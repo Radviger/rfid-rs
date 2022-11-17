@@ -1,24 +1,27 @@
-//! Raspberry Pi demo
+//! Raspberry Pi 4 demo
 //!
 //! # Connections
 //!
-//! IMPORTANT: Do *not* use PIN24 / BCM8 / CE0 as the NSS pin
+//! IMPORTANT: Using the hardware `chip-enable` pins are currently not supported
 //!
-//! - PIN1 = 3V3 = VCC
-//! - PIN19 = BCM10 = MOSI
-//! - PIN21 = BCM9 = MISO (SCL)
-//! - PIN23 = BCM11 = SCLK
-//! - PIN22 = BCM25 = NSS (SDA)
-//! - PIN6 = GND = GND
+//! - 3V3    = VCC
+//! - GND    = GND
+//! - GPIO9  = MISO
+//! - GPIO10 = MOSI
+//! - GPIO11 = SCLK (SCK)
+//! - GPIO22 = NSS  (SDA)
 
 use linux_embedded_hal as hal;
 
 use std::fs::File;
 use std::io::Write;
 
-use hal::spidev::SpidevOptions;
+use embedded_hal::blocking::delay::DelayMs;
+use embedded_hal::blocking::spi::{Transfer as SpiTransfer, Write as SpiWrite};
+use embedded_hal::digital::v2::OutputPin;
+use hal::spidev::{SpiModeFlags, SpidevOptions};
 use hal::sysfs_gpio::Direction;
-use hal::{Pin, Spidev};
+use hal::{Delay, Pin, Spidev};
 use mfrc522::Mfrc522;
 
 // NOTE this requires tweaking permissions and configuring LED0
@@ -50,20 +53,24 @@ impl Led {
 }
 
 fn main() {
+    let mut led = Led;
+    let mut delay = Delay;
+
     let mut spi = Spidev::open("/dev/spidev0.0").unwrap();
     let options = SpidevOptions::new()
         .max_speed_hz(1_000_000)
-        .mode(hal::spidev::SPI_MODE_0)
+        .mode(SpiModeFlags::SPI_MODE_0)
         .build();
     spi.configure(&options).unwrap();
 
-    let pin = Pin::new(25);
+    let pin = Pin::new(22);
     pin.export().unwrap();
-    while !pin.is_exported() {}
+    while !pin.is_exported() {
+        delay.delay_ms(1u32);
+    }
     pin.set_direction(Direction::Out).unwrap();
     pin.set_value(1).unwrap();
 
-    let mut led = Led;
     let mut mfrc522 = Mfrc522::new(spi, pin).unwrap();
 
     let vers = mfrc522.version().unwrap();
@@ -78,16 +85,18 @@ fn main() {
 
         if let Ok(atqa) = mfrc522.reqa() {
             if let Ok(uid) = mfrc522.select(&atqa) {
-                println!("UID: {:?}", uid);
+                println!("UID: {:?}", uid.as_bytes());
 
-                if uid.bytes() == &CARD_UID {
+                if uid.as_bytes() == &CARD_UID {
                     led.off();
                     println!("CARD");
-                } else if uid.bytes() == &TAG_UID {
+                } else if uid.as_bytes() == &TAG_UID {
                     led.on();
                     println!("TAG");
                 }
             }
         }
+
+        delay.delay_ms(1000u32);
     }
 }
