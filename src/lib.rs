@@ -1,5 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+mod picc;
+mod util;
+
 use core::result;
 
 use embedded_hal as hal;
@@ -8,7 +11,7 @@ use hal::digital::v2::OutputPin;
 
 use heapless::Vec;
 
-mod picc;
+use util::DummyNSS;
 
 /// Registers in the MFRC522, the Proximity Coupling Device (PCD) used here.
 #[allow(dead_code)]
@@ -221,13 +224,31 @@ const TIMER_IRQ: u8 = 1 << 0;
 
 const CRC_IRQ: u8 = 1 << 2;
 
+impl<E, SPI> Mfrc522<SPI, DummyNSS>
+where
+    SPI: spi::Transfer<u8, Error = E> + spi::Write<u8, Error = E>,
+{
+    /// Create a new MFRC522 driver from a SPI interface.
+    ///
+    /// Use this method if your SPI interface controls the chip-select/NSS pin in hardware.\
+    /// Use the [with_nss](Mfrc522::with_nss) method when the chip-select/NSS pin should be
+    /// controlled in software.
+    pub fn new(spi: SPI) -> Result<Self, E> {
+        Mfrc522::with_nss(spi, DummyNSS {})
+    }
+}
+
 impl<E, NSS, SPI> Mfrc522<SPI, NSS>
 where
     SPI: spi::Transfer<u8, Error = E> + spi::Write<u8, Error = E>,
     NSS: OutputPin,
 {
-    /// Creates a new driver from a SPI driver and a NSS pin
-    pub fn new(spi: SPI, nss: NSS) -> Result<Self, E> {
+    /// Create a new MFRC522 driver from a SPI interface and chip-select/NSS pin.
+    ///
+    /// The driver will control the NSS pin in software during SPI transfers.\
+    /// If your SPI interface controls the chip-select/NSS pin in hardware, use the *regular*
+    /// [new](Mfrc522::new) method.
+    pub fn with_nss(spi: SPI, nss: NSS) -> Result<Self, E> {
         let mut mfrc522 = Mfrc522 { spi, nss };
         mfrc522.reset()?;
         mfrc522.write(Register::TxModeReg, 0x00)?;
