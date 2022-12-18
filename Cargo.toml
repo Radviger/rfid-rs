@@ -11,6 +11,9 @@ homepage = "https://gitlab.com/jspngh/rfid-rs"
 keywords = ["rfid", "mfrc522", "embedded-hal", "mifare"]
 categories = ["embedded", "hardware-support", "no-std"]
 
+[features]
+std = []
+
 [dependencies]
 embedded-hal = "0.2"
 heapless = "0.7"

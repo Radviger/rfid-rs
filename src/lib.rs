@@ -1,9 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+pub mod error;
 mod picc;
 mod util;
-
-use core::result;
 
 use embedded_hal as hal;
 use hal::blocking::spi;
@@ -11,6 +10,7 @@ use hal::digital::v2::OutputPin;
 
 use heapless::Vec;
 
+use error::Error;
 use util::DummyNSS;
 
 /// Registers in the MFRC522, the Proximity Coupling Device (PCD) used here.
@@ -18,7 +18,7 @@ use util::DummyNSS;
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 enum Register {
-    // Reserved         = 0x00,
+    // Reserved = 0x00,
     CommandReg = 0x01,
     ComlEnReg = 0x02,
     DivlEnReg = 0x03,
@@ -33,8 +33,8 @@ enum Register {
     ControlReg = 0x0C,
     BitFramingReg = 0x0D,
     CollReg = 0x0E,
-    // Reserved         = 0x0F,
-    // Reserved         = 0x10,
+    // Reserved = 0x0F,
+    // Reserved = 0x10,
     ModeReg = 0x11,
     TxModeReg = 0x12,
     RxModeReg = 0x13,
@@ -44,18 +44,18 @@ enum Register {
     RxSelReg = 0x17,
     RxThresholdReg = 0x18,
     DemodReg = 0x19,
-    // Reserved         = 0x1A,
-    // Reserved         = 0x1B,
+    // Reserved = 0x1A,
+    // Reserved = 0x1B,
     MfTxReg = 0x1C,
     MfRxReg = 0x1D,
-    // Reserved         = 0x1E,
+    // Reserved = 0x1E,
     SerialSpeedReg = 0x1F,
-    // Reserved         = 0x20,
+    // Reserved = 0x20,
     CRCResultRegHigh = 0x21,
     CRCResultRegLow = 0x22,
-    // Reserved         = 0x23,
+    // Reserved = 0x23,
     ModWidthReg = 0x24,
-    // Reserved         = 0x25,
+    // Reserved = 0x25,
     RFCfgReg = 0x26,
     GsNReg = 0x27,
     CWGsPReg = 0x28,
@@ -66,7 +66,7 @@ enum Register {
     TReloadRegLow = 0x2D,
     TCounterValRegHigh = 0x2E,
     TCounterValRegLow = 0x2F,
-    // Reserved         = 0x30,
+    // Reserved = 0x30,
     TestSel1Reg = 0x31,
     TestSel2Reg = 0x32,
     TestPinEnReg = 0x33,
@@ -78,7 +78,7 @@ enum Register {
     TestDAC1Reg = 0x39,
     TestDAC2Reg = 0x3A,
     TestADCReg = 0x3B,
-    // Reserved         = 0x3C-0x3F,
+    // Reserved = 0x3C-0x3F,
 }
 impl From<Register> for u8 {
     #[inline(always)]
@@ -120,39 +120,6 @@ impl From<Command> for u8 {
     fn from(variant: Command) -> Self {
         variant as _
     }
-}
-
-/// Errors
-#[derive(Debug)]
-pub enum Error<E> {
-    /// Wrong Block Character Check (BCC)
-    Bcc,
-    /// FIFO buffer overflow
-    BufferOverflow,
-    /// Collision
-    Collision,
-    /// Wrong CRC
-    Crc,
-    /// Incomplete RX frame
-    IncompleteFrame,
-    /// Provided buffer not large enough
-    NoRoom,
-    /// Internal temperature sensor detects overheating
-    Overheating,
-    /// Parity check failed
-    Parity,
-    /// Error during MFAuthent operation
-    Protocol,
-    /// SPI bus error
-    Spi(E),
-    /// Timeout
-    Timeout,
-    /// ???
-    Wr,
-    /// Not acknowledge
-    Nak,
-    /// Proprietary frames, commands or protocols used
-    Proprietary,
 }
 
 pub enum Uid {
@@ -433,8 +400,9 @@ where
 
     /// Switch off the MIFARE Crypto1 unit.
     /// Must be done after communication with an authenticated PICC
-    pub fn stop_crypto1(&mut self) -> Result<(), E> {
+    pub fn stop_crypto1(&mut self) -> Result<(), Error<E>> {
         self.rmw(Register::Status2Reg, |b| b & !0x08)
+            .map_err(Error::Spi)
     }
 
     pub fn mf_authenticate(
@@ -520,11 +488,11 @@ where
     }
 
     /// Returns the version of the MFRC522
-    pub fn version(&mut self) -> Result<u8, E> {
-        self.read(Register::VersionReg)
+    pub fn version(&mut self) -> Result<u8, Error<E>> {
+        self.read(Register::VersionReg).map_err(Error::Spi)
     }
 
-    pub fn new_card_present(&mut self) -> result::Result<AtqA, Error<E>> {
+    pub fn new_card_present(&mut self) -> Result<AtqA, Error<E>> {
         self.write(Register::TxModeReg, 0x00).map_err(Error::Spi)?;
         self.write(Register::RxModeReg, 0x00).map_err(Error::Spi)?;
         self.write(Register::ModWidthReg, 0x26)
