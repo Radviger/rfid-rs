@@ -1,8 +1,8 @@
-//! Raspberry Pi 4 demo
+//! Raspberry Pi 4 demo.
+//! This example makes use the `std` feature
+//! and `anyhow` dependency to make error handling more ergonomic.
 //!
 //! # Connections
-//!
-//! IMPORTANT: Using the hardware `chip-enable` pins are currently not supported
 //!
 //! - 3V3    = VCC
 //! - GND    = GND
@@ -16,7 +16,10 @@ use linux_embedded_hal as hal;
 use std::fs::File;
 use std::io::Write;
 
+use anyhow::Result;
 use embedded_hal::blocking::delay::DelayMs;
+use embedded_hal::blocking::spi::{Transfer as SpiTransfer, Write as SpiWrite};
+use embedded_hal::digital::v2::OutputPin;
 use hal::spidev::{SpiModeFlags, SpidevOptions};
 use hal::sysfs_gpio::Direction;
 use hal::{Delay, Pin, Spidev};
@@ -31,7 +34,6 @@ use mfrc522::Mfrc522;
 // ```
 //
 // Alternatively you can omit the LED and comment out the contents of the `on` and `off` methods
-// below
 pub struct Led;
 
 impl Led {
@@ -50,7 +52,7 @@ impl Led {
     }
 }
 
-fn main() {
+fn main() -> Result<()> {
     let mut led = Led;
     let mut delay = Delay;
 
@@ -61,19 +63,19 @@ fn main() {
         .build();
     spi.configure(&options).unwrap();
 
+    // software-controlled chip select pin
     let pin = Pin::new(22);
     pin.export().unwrap();
-    while !pin.is_exported() {
-        delay.delay_ms(1u32);
-    }
+    while !pin.is_exported() {}
+    delay.delay_ms(1u32); // delay sometimes necessary because `is_exported()` returns to early?
     pin.set_direction(Direction::Out).unwrap();
     pin.set_value(1).unwrap();
 
     // The `with_nss` method provides a GPIO pin to the driver for software controlled chip select.
-    // If you want hardware chip select use `Mfrc522::new(spi).unwrap();
-    let mut mfrc522 = Mfrc522::with_nss(spi, pin).unwrap();
+    // If you have connected a hardware chip select use `Mfrc522::new(spi)`.
+    let mut mfrc522 = Mfrc522::with_nss(spi, pin)?;
 
-    let vers = mfrc522.version().unwrap();
+    let vers = mfrc522.version()?;
 
     println!("VERSION: 0x{:x}", vers);
 
@@ -94,9 +96,40 @@ fn main() {
                     led.on();
                     println!("TAG");
                 }
+
+                handle_authenticate(&mut mfrc522, &uid, |m| {
+                    let data = m.mf_read(1)?;
+                    println!("read {:?}", data);
+                    Ok(())
+                })
+                .ok();
             }
         }
 
         delay.delay_ms(1000u32);
     }
+}
+
+fn handle_authenticate<E, SPI, NSS, F>(
+    mfrc522: &mut Mfrc522<SPI, NSS>,
+    uid: &mfrc522::Uid,
+    action: F,
+) -> Result<()>
+where
+    SPI: SpiTransfer<u8, Error = E> + SpiWrite<u8, Error = E>,
+    NSS: OutputPin,
+    F: FnOnce(&mut Mfrc522<SPI, NSS>) -> Result<()>,
+    E: std::fmt::Debug + std::marker::Sync + std::marker::Send + 'static,
+{
+    // Use *default* key, this should work on new/empty cards
+    let key = [0xFF; 6];
+    if mfrc522.mf_authenticate(uid, 1, &key).is_ok() {
+        action(mfrc522)?;
+    } else {
+        println!("Could not authenticate");
+    }
+
+    mfrc522.hlta()?;
+    mfrc522.stop_crypto1()?;
+    Ok(())
 }
