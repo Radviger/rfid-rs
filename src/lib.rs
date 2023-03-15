@@ -11,7 +11,7 @@ use hal::digital::v2::OutputPin;
 use heapless::Vec;
 
 use error::Error;
-use util::DummyNSS;
+use util::{DummyNSS, Sealed};
 
 /// Registers in the MFRC522, the Proximity Coupling Device (PCD) used here.
 #[allow(dead_code)]
@@ -178,10 +178,21 @@ const MIFARE_ACK: u8 = 0xA;
 const MIFARE_KEYSIZE: usize = 6;
 pub type MifareKey = [u8; MIFARE_KEYSIZE];
 
+pub trait State: Sealed {}
+
+pub enum Uninitialized {}
+pub enum Initialized {}
+
+impl State for Uninitialized {}
+impl State for Initialized {}
+impl Sealed for Uninitialized {}
+impl Sealed for Initialized {}
+
 /// MFRC522 driver
-pub struct Mfrc522<SPI, NSS> {
+pub struct Mfrc522<SPI, NSS, S: State> {
     spi: SPI,
     nss: NSS,
+    state: core::marker::PhantomData<S>,
 }
 
 const ERR_IRQ: u8 = 1 << 1;
@@ -191,7 +202,7 @@ const TIMER_IRQ: u8 = 1 << 0;
 
 const CRC_IRQ: u8 = 1 << 2;
 
-impl<E, SPI> Mfrc522<SPI, DummyNSS>
+impl<E, SPI> Mfrc522<SPI, DummyNSS, Uninitialized>
 where
     SPI: spi::Transfer<u8, Error = E> + spi::Write<u8, Error = E>,
 {
@@ -200,37 +211,43 @@ where
     /// The resulting driver will use a *dummy* NSS pin and expects the
     /// actual chip-select to be controlled by hardware.
     /// Use the [with_nss](Mfrc522::with_nss) method to add a software controlled NSS pin.
-    pub fn new(spi: SPI) -> Mfrc522<SPI, DummyNSS> {
+    pub fn new(spi: SPI) -> Mfrc522<SPI, DummyNSS, Uninitialized> {
         Mfrc522 {
             spi,
             nss: DummyNSS {},
+            state: core::marker::PhantomData,
         }
     }
 
     /// Add a software controlled chip-select/NSS pin that should be used by this driver
     /// for the SPI communication. This is necessary if your hardware does not support
     /// hardware controller NSS or if it is unavailable to you for some reason.
-    pub fn with_nss<NSS: OutputPin>(self, nss: NSS) -> Mfrc522<SPI, NSS> {
-        Mfrc522 { spi: self.spi, nss }
+    pub fn with_nss<NSS: OutputPin>(self, nss: NSS) -> Mfrc522<SPI, NSS, Uninitialized> {
+        Mfrc522 {
+            spi: self.spi,
+            nss,
+            state: core::marker::PhantomData,
+        }
     }
 }
 
-impl<SPI, NSS> Mfrc522<SPI, NSS> {
+impl<SPI, NSS, S: State> Mfrc522<SPI, NSS, S> {
     /// Release the underlying SPI device and NSS pin
     pub fn release(self) -> (SPI, NSS) {
         (self.spi, self.nss)
     }
 }
 
-impl<E, SPI, NSS> Mfrc522<SPI, NSS>
+// The driver can transition to the `Initialized` state using this function
+impl<E, SPI, NSS> Mfrc522<SPI, NSS, Uninitialized>
 where
     SPI: spi::Transfer<u8, Error = E> + spi::Write<u8, Error = E>,
     NSS: OutputPin,
 {
     /// Initialize the MFRC522.
     ///
-    /// This should be called before doing any other operation.
-    pub fn init(&mut self) -> Result<(), E> {
+    /// This needs to be called before you can do any other operation.
+    pub fn init(mut self) -> Result<Mfrc522<SPI, NSS, Initialized>, E> {
         self.reset()?;
         self.write(Register::TxModeReg, 0x00)?;
         self.write(Register::RxModeReg, 0x00)?;
@@ -248,9 +265,20 @@ where
         self.write(Register::ModeReg, (0x3f & (!0b11)) | 0b01)?;
         self.rmw(Register::TxControlReg, |b| b | 0b11)?;
 
-        Ok(())
+        Ok(Mfrc522 {
+            spi: self.spi,
+            nss: self.nss,
+            state: core::marker::PhantomData,
+        })
     }
+}
 
+// The public functions can only be used after initializing
+impl<E, SPI, NSS> Mfrc522<SPI, NSS, Initialized>
+where
+    SPI: spi::Transfer<u8, Error = E> + spi::Write<u8, Error = E>,
+    NSS: OutputPin,
+{
     /// Sends a REQuest type A to nearby PICCs
     pub fn reqa<'b>(&mut self) -> Result<AtqA, Error<E>> {
         // NOTE REQA is a short frame (7 bits)
@@ -514,7 +542,14 @@ where
 
         self.reqa()
     }
+}
 
+// The private functions are implemented for all states.
+impl<E, SPI, NSS, S: State> Mfrc522<SPI, NSS, S>
+where
+    SPI: spi::Transfer<u8, Error = E> + spi::Write<u8, Error = E>,
+    NSS: OutputPin,
+{
     fn calculate_crc(&mut self, data: &[u8]) -> Result<[u8; 2], Error<E>> {
         // stop any ongoing command
         self.command(Command::Idle).map_err(Error::Spi)?;
