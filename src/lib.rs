@@ -197,44 +197,58 @@ where
 {
     /// Create a new MFRC522 driver from a SPI interface.
     ///
-    /// Use this method if your SPI interface controls the chip-select/NSS pin in hardware.\
-    /// Use the [with_nss](Mfrc522::with_nss) method when the chip-select/NSS pin should be
-    /// controlled in software.
-    pub fn new(spi: SPI) -> Result<Self, E> {
-        Mfrc522::with_nss(spi, DummyNSS {})
+    /// The resulting driver will use a *dummy* NSS pin and expects the
+    /// actual chip-select to be controlled by hardware.
+    /// Use the [with_nss](Mfrc522::with_nss) method to add a software controlled NSS pin.
+    pub fn new(spi: SPI) -> Mfrc522<SPI, DummyNSS> {
+        Mfrc522 {
+            spi,
+            nss: DummyNSS {},
+        }
+    }
+
+    /// Add a software controlled chip-select/NSS pin that should be used by this driver
+    /// for the SPI communication. This is necessary if your hardware does not support
+    /// hardware controller NSS or if it is unavailable to you for some reason.
+    pub fn with_nss<NSS: OutputPin>(self, nss: NSS) -> Mfrc522<SPI, NSS> {
+        Mfrc522 { spi: self.spi, nss }
     }
 }
 
-impl<E, NSS, SPI> Mfrc522<SPI, NSS>
+impl<SPI, NSS> Mfrc522<SPI, NSS> {
+    /// Release the underlying SPI device and NSS pin
+    pub fn release(self) -> (SPI, NSS) {
+        (self.spi, self.nss)
+    }
+}
+
+impl<E, SPI, NSS> Mfrc522<SPI, NSS>
 where
     SPI: spi::Transfer<u8, Error = E> + spi::Write<u8, Error = E>,
     NSS: OutputPin,
 {
-    /// Create a new MFRC522 driver from a SPI interface and chip-select/NSS pin.
+    /// Initialize the MFRC522.
     ///
-    /// The driver will control the NSS pin in software during SPI transfers.\
-    /// If your SPI interface controls the chip-select/NSS pin in hardware, use the *regular*
-    /// [new](Mfrc522::new) method.
-    pub fn with_nss(spi: SPI, nss: NSS) -> Result<Self, E> {
-        let mut mfrc522 = Mfrc522 { spi, nss };
-        mfrc522.reset()?;
-        mfrc522.write(Register::TxModeReg, 0x00)?;
-        mfrc522.write(Register::RxModeReg, 0x00)?;
+    /// This should be called before doing any other operation.
+    pub fn init(&mut self) -> Result<(), E> {
+        self.reset()?;
+        self.write(Register::TxModeReg, 0x00)?;
+        self.write(Register::RxModeReg, 0x00)?;
         // Reset ModWidthReg
-        mfrc522.write(Register::ModWidthReg, 0x26)?;
+        self.write(Register::ModWidthReg, 0x26)?;
         // When communicating with a PICC we need a timeout if something goes wrong.
         // f_timer = 13.56 MHz / (2*TPreScaler+1) where TPreScaler = [TPrescaler_Hi:TPrescaler_Lo].
         // TPrescaler_Hi are the four low bits in TModeReg. TPrescaler_Lo is TPrescalerReg.
-        mfrc522.write(Register::TModeReg, 0x80)?; // TAuto=1; timer starts automatically at the end of the transmission in all communication modes at all speeds
-        mfrc522.write(Register::TPrescalerReg, 0xA9)?; // TPreScaler = TModeReg[3..0]:TPrescalerReg, ie 0x0A9 = 169 => f_timer=40kHz, ie a timer period of 25μs.
-        mfrc522.write(Register::TReloadRegHigh, 0x03)?; // Reload timer with 0x3E8 = 1000, ie 25ms before timeout.
-        mfrc522.write(Register::TReloadRegLow, 0xE8)?;
-        mfrc522.write(Register::TxASKReg, 0x40)?; // Default 0x00. Force a 100 % ASK modulation independent of the ModGsPReg register setting
-                                                  // Default 0x3F. Set the preset value for the CRC coprocessor for the CalcCRC command to 0x6363 (ISO 14443-3 part 6.2.4)
-        mfrc522.write(Register::ModeReg, (0x3f & (!0b11)) | 0b01)?;
-        mfrc522.rmw(Register::TxControlReg, |b| b | 0b11)?;
+        self.write(Register::TModeReg, 0x80)?; // TAuto=1; timer starts automatically at the end of the transmission in all communication modes at all speeds
+        self.write(Register::TPrescalerReg, 0xA9)?; // TPreScaler = TModeReg[3..0]:TPrescalerReg, ie 0x0A9 = 169 => f_timer=40kHz, ie a timer period of 25μs.
+        self.write(Register::TReloadRegHigh, 0x03)?; // Reload timer with 0x3E8 = 1000, ie 25ms before timeout.
+        self.write(Register::TReloadRegLow, 0xE8)?;
+        self.write(Register::TxASKReg, 0x40)?; // Default 0x00. Force a 100 % ASK modulation independent of the ModGsPReg register setting
+                                               // Default 0x3F. Set the preset value for the CRC coprocessor for the CalcCRC command to 0x6363 (ISO 14443-3 part 6.2.4)
+        self.write(Register::ModeReg, (0x3f & (!0b11)) | 0b01)?;
+        self.rmw(Register::TxControlReg, |b| b | 0b11)?;
 
-        Ok(mfrc522)
+        Ok(())
     }
 
     /// Sends a REQuest type A to nearby PICCs
