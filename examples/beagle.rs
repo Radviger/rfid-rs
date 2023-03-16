@@ -20,7 +20,7 @@ use embedded_hal::digital::v2::OutputPin;
 use hal::spidev::{SpiModeFlags, SpidevOptions};
 use hal::sysfs_gpio::Direction;
 use hal::{Delay, Pin, Spidev};
-use mfrc522::Mfrc522;
+use mfrc522::{Mfrc522, Initialized, WithNssDelay};
 
 // NOTE this requires tweaking permissions and configuring LED0
 //
@@ -69,8 +69,8 @@ fn main() {
     let mut delay = Delay;
     // The `new` method assumes the chip select is hardware-controlled.
     // If you want software chip select (with GPIO5 in this case),
-    // use `Mfrc522::with_nss(spi, pin).unwrap();
-    let mut mfrc522 = Mfrc522::new(spi).unwrap();
+    // add a call to `with_nss(pin)`.
+    let mut mfrc522 = Mfrc522::new(spi).init().unwrap();
 
     let vers = mfrc522.version().unwrap();
 
@@ -130,14 +130,14 @@ fn main() {
     }
 }
 
-fn handle_authenticate<E, SPI, NSS, F>(
-    mfrc522: &mut Mfrc522<SPI, NSS>,
+fn handle_authenticate<E, SPI, NSS, D, F>(
+    mfrc522: &mut Mfrc522<SPI, NSS, D, Initialized>,
     uid: &mfrc522::Uid,
     action: F,
 ) where
     SPI: SpiTransfer<u8, Error = E> + SpiWrite<u8, Error = E>,
-    NSS: OutputPin,
-    F: FnOnce(&mut Mfrc522<SPI, NSS>) -> (),
+    Mfrc522<SPI, NSS, D, Initialized>: WithNssDelay,
+    F: FnOnce(&mut Mfrc522<SPI, NSS, D, Initialized>) -> (),
 {
     let key = [0xFF; 6];
     if mfrc522.mf_authenticate(uid, 1, &key).is_ok() {
