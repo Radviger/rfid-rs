@@ -1,19 +1,8 @@
-use embedded_hal::digital::v2::{OutputPin, PinState};
-
+/// Type to represent *'no software controlled NSS'*.
 pub struct DummyNSS;
 
-impl OutputPin for DummyNSS {
-    type Error = ();
-    fn set_low(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn set_high(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn set_state(&mut self, _state: PinState) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
+/// Type to represent *'no delay function'*.
+pub struct DummyDelay;
 
 mod sealed {
     /// A trait that can be implemented to limit implementations to this crate.

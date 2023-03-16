@@ -11,7 +11,7 @@ use hal::digital::v2::OutputPin;
 use heapless::Vec;
 
 use error::Error;
-use util::{DummyNSS, Sealed};
+use util::{DummyDelay, DummyNSS, Sealed};
 
 /// Registers in the MFRC522, the Proximity Coupling Device (PCD) used here.
 #[allow(dead_code)]
@@ -189,9 +189,10 @@ impl Sealed for Uninitialized {}
 impl Sealed for Initialized {}
 
 /// MFRC522 driver
-pub struct Mfrc522<SPI, NSS, S: State> {
+pub struct Mfrc522<SPI, NSS, D, S: State> {
     spi: SPI,
     nss: NSS,
+    delay: D,
     state: core::marker::PhantomData<S>,
 }
 
@@ -202,7 +203,7 @@ const TIMER_IRQ: u8 = 1 << 0;
 
 const CRC_IRQ: u8 = 1 << 2;
 
-impl<E, SPI> Mfrc522<SPI, DummyNSS, Uninitialized>
+impl<E, SPI> Mfrc522<SPI, DummyNSS, DummyDelay, Uninitialized>
 where
     SPI: spi::Transfer<u8, Error = E> + spi::Write<u8, Error = E>,
 {
@@ -210,28 +211,55 @@ where
     ///
     /// The resulting driver will use a *dummy* NSS pin and expects the
     /// actual chip-select to be controlled by hardware.
+    ///
     /// Use the [with_nss](Mfrc522::with_nss) method to add a software controlled NSS pin.
-    pub fn new(spi: SPI) -> Mfrc522<SPI, DummyNSS, Uninitialized> {
+    pub fn new(spi: SPI) -> Mfrc522<SPI, DummyNSS, DummyDelay, Uninitialized> {
         Mfrc522 {
             spi,
             nss: DummyNSS {},
-            state: core::marker::PhantomData,
-        }
-    }
-
-    /// Add a software controlled chip-select/NSS pin that should be used by this driver
-    /// for the SPI communication. This is necessary if your hardware does not support
-    /// hardware controller NSS or if it is unavailable to you for some reason.
-    pub fn with_nss<NSS: OutputPin>(self, nss: NSS) -> Mfrc522<SPI, NSS, Uninitialized> {
-        Mfrc522 {
-            spi: self.spi,
-            nss,
+            delay: DummyDelay {},
             state: core::marker::PhantomData,
         }
     }
 }
 
-impl<SPI, NSS, S: State> Mfrc522<SPI, NSS, S> {
+impl<SPI, D> Mfrc522<SPI, DummyNSS, D, Uninitialized> {
+    /// Add a software controlled chip-select/NSS pin that should be used by this driver
+    /// for the SPI communication.
+    ///
+    /// This is necessary if your hardware does not support hardware controller NSS
+    /// or if it is unavailable to you for some reason.
+    pub fn with_nss<NSS: OutputPin>(self, nss: NSS) -> Mfrc522<SPI, NSS, D, Uninitialized> {
+        Mfrc522 {
+            spi: self.spi,
+            nss,
+            delay: self.delay,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<SPI, NSS> Mfrc522<SPI, NSS, DummyDelay, Uninitialized> {
+    /// Add a delay function to be used after each SPI transaction.
+    ///
+    /// The MFRC522 specifies that the NSS pin needs to be high/de-asserted
+    /// for at least 50ns between communications.
+    ///
+    /// If optimizations are enabled, we can run into issues with this timing requirement
+    /// if we do not add a delay between transactions.
+    /// This function allows the user to specify a (platform specific) function
+    /// that will (busy) wait for at least 50ns.
+    pub fn with_delay<D: FnMut()>(self, delay: D) -> Mfrc522<SPI, NSS, D, Uninitialized> {
+        Mfrc522 {
+            spi: self.spi,
+            nss: self.nss,
+            delay,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<SPI, NSS, D, S: State> Mfrc522<SPI, NSS, D, S> {
     /// Release the underlying SPI device and NSS pin
     pub fn release(self) -> (SPI, NSS) {
         (self.spi, self.nss)
@@ -239,15 +267,15 @@ impl<SPI, NSS, S: State> Mfrc522<SPI, NSS, S> {
 }
 
 // The driver can transition to the `Initialized` state using this function
-impl<E, SPI, NSS> Mfrc522<SPI, NSS, Uninitialized>
+impl<E, SPI, NSS, D> Mfrc522<SPI, NSS, D, Uninitialized>
 where
     SPI: spi::Transfer<u8, Error = E> + spi::Write<u8, Error = E>,
-    NSS: OutputPin,
+    Mfrc522<SPI, NSS, D, Uninitialized>: WithNssDelay,
 {
     /// Initialize the MFRC522.
     ///
     /// This needs to be called before you can do any other operation.
-    pub fn init(mut self) -> Result<Mfrc522<SPI, NSS, Initialized>, E> {
+    pub fn init(mut self) -> Result<Mfrc522<SPI, NSS, D, Initialized>, E> {
         self.reset()?;
         self.write(Register::TxModeReg, 0x00)?;
         self.write(Register::RxModeReg, 0x00)?;
@@ -268,16 +296,17 @@ where
         Ok(Mfrc522 {
             spi: self.spi,
             nss: self.nss,
+            delay: self.delay,
             state: core::marker::PhantomData,
         })
     }
 }
 
 // The public functions can only be used after initializing
-impl<E, SPI, NSS> Mfrc522<SPI, NSS, Initialized>
+impl<E, SPI, NSS, D> Mfrc522<SPI, NSS, D, Initialized>
 where
     SPI: spi::Transfer<u8, Error = E> + spi::Write<u8, Error = E>,
-    NSS: OutputPin,
+    Mfrc522<SPI, NSS, D, Initialized>: WithNssDelay,
 {
     /// Sends a REQuest type A to nearby PICCs
     pub fn reqa<'b>(&mut self) -> Result<AtqA, Error<E>> {
@@ -545,10 +574,10 @@ where
 }
 
 // The private functions are implemented for all states.
-impl<E, SPI, NSS, S: State> Mfrc522<SPI, NSS, S>
+impl<E, SPI, NSS, D, S: State> Mfrc522<SPI, NSS, D, S>
 where
     SPI: spi::Transfer<u8, Error = E> + spi::Write<u8, Error = E>,
-    NSS: OutputPin,
+    Mfrc522<SPI, NSS, D, S>: WithNssDelay,
 {
     fn calculate_crc(&mut self, data: &[u8]) -> Result<[u8; 2], Error<E>> {
         // stop any ongoing command
@@ -758,7 +787,50 @@ where
             Ok(())
         })
     }
+}
 
+/// Temporary trait to allow different implementations in case a NSS pin and/or
+/// a delay function have been added to the Mfrc522.
+/// The entire way of communicating to the chip needs to be refactored,
+/// to also allow an implementation of I2C and UART communication.
+/// When that is tackled, this trait will disappear.
+pub trait WithNssDelay {
+    fn with_nss_low<F, T>(&mut self, f: F) -> T
+    where
+        F: FnOnce(&mut Self) -> T;
+}
+
+#[doc(hidden)]
+impl<SPI, S: State> WithNssDelay for Mfrc522<SPI, DummyNSS, DummyDelay, S> {
+    fn with_nss_low<F, T>(&mut self, f: F) -> T
+    where
+        F: FnOnce(&mut Self) -> T,
+    {
+        f(self)
+    }
+}
+
+#[doc(hidden)]
+impl<SPI, D, S: State> WithNssDelay for Mfrc522<SPI, DummyNSS, D, S>
+where
+    D: FnMut(),
+{
+    fn with_nss_low<F, T>(&mut self, f: F) -> T
+    where
+        F: FnOnce(&mut Self) -> T,
+    {
+        let result = f(self);
+        (self.delay)();
+
+        result
+    }
+}
+
+#[doc(hidden)]
+impl<SPI, NSS, S: State> WithNssDelay for Mfrc522<SPI, NSS, DummyDelay, S>
+where
+    NSS: OutputPin,
+{
     fn with_nss_low<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(&mut Self) -> T,
@@ -766,6 +838,25 @@ where
         self.nss.set_low();
         let result = f(self);
         self.nss.set_high();
+
+        result
+    }
+}
+
+#[doc(hidden)]
+impl<SPI, NSS, D, S: State> WithNssDelay for Mfrc522<SPI, NSS, D, S>
+where
+    NSS: OutputPin,
+    D: FnMut(),
+{
+    fn with_nss_low<F, T>(&mut self, f: F) -> T
+    where
+        F: FnOnce(&mut Self) -> T,
+    {
+        self.nss.set_low();
+        let result = f(self);
+        self.nss.set_high();
+        (self.delay)();
 
         result
     }
