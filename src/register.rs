@@ -4,67 +4,107 @@
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum Register {
-    // Reserved = 0x00,
+    /// Starts and stops command execution.
     CommandReg = 0x01,
+    /// Control bits to enable and disable the passing of interrupt requests.
     ComlEnReg = 0x02,
+    /// Control bits to enable and disable the passing of interrupt requests.
     DivlEnReg = 0x03,
+    /// Interrupt request bits.
     ComIrqReg = 0x04,
+    /// Interrupt request bits.
     DivIrqReg = 0x05,
+    /// Error bit register showing the error status of the last command executed.
     ErrorReg = 0x06,
+    /// Contains status bits of the CRC, interrupt and FIFO buffer.
     Status1Reg = 0x07,
+    /// Contains status bits of the receiver, transmitter and data mode detector.
     Status2Reg = 0x08,
+    /// Input and output of 64 byte FIFO buffer.
     FIFODataReg = 0x09,
+    /// Indicates the number of bytes stored in the FIFO.
     FIFOLevelReg = 0x0A,
+    /// Defines the level for FIFO under- and overflow warning.
     WaterLevelReg = 0x0B,
+    /// Miscellaneous control bits.
     ControlReg = 0x0C,
+    /// Adjustments for bit-oriented frames.
     BitFramingReg = 0x0D,
+    /// Defines the first bit-collision detected on the RF interface.
     CollReg = 0x0E,
-    // Reserved = 0x0F,
-    // Reserved = 0x10,
+    /// Defines general mode settings for transmitting and receiving.
     ModeReg = 0x11,
+    /// Defines the data rate during transmission.
     TxModeReg = 0x12,
+    /// Defines the data rate during reception.
     RxModeReg = 0x13,
+    /// Controls the logical behavior of the antenna driver pins TX1 and TX2.
     TxControlReg = 0x14,
+    /// Controls transmit modulation settings.
     TxASKReg = 0x15,
+    /// Selects the internal sources for the analog module.
     TxSelReg = 0x16,
+    /// Selects internal receiver settings.
     RxSelReg = 0x17,
+    /// Selects thresholds for the bit decoder.
     RxThresholdReg = 0x18,
+    /// Defines demodulator settings.
     DemodReg = 0x19,
-    // Reserved = 0x1A,
-    // Reserved = 0x1B,
+    /// Controls some MIFARE communication transmit parameters.
     MfTxReg = 0x1C,
+    /// Controls some MIFARE communication receive parameters.
     MfRxReg = 0x1D,
-    // Reserved = 0x1E,
+    /// Selects the speed of the serial UART interface.
     SerialSpeedReg = 0x1F,
-    // Reserved = 0x20,
+    /// CRC calculation highest 8 bits.
     CRCResultRegHigh = 0x21,
+    /// CRC calculation lowest 8 bits.
     CRCResultRegLow = 0x22,
-    // Reserved = 0x23,
+    /// Sets the modulation width.
     ModWidthReg = 0x24,
-    // Reserved = 0x25,
+    /// Configures the receiver gain.
     RFCfgReg = 0x26,
+    /// Defines the conductance of the antenna driver pins TX1 and TX2 for the n-driver
+    /// when the driver is switched on.
     GsNReg = 0x27,
+    /// Defines the conductance of the p-driver output during periods of no modulation.
     CWGsPReg = 0x28,
+    /// Defines the conductance of the p-driver output during modulation.
     ModGsPReg = 0x29,
+    /// Timer settings + prescaler highest 4 bits.
     TModeReg = 0x2A,
+    /// Timer prescaler lowest 8 bits.
     TPrescalerReg = 0x2B,
+    /// Timer reload value highest 8 bits.
     TReloadRegHigh = 0x2C,
+    /// Timer reload value lowest 8 bits.
     TReloadRegLow = 0x2D,
+    /// Timer value highest 8 bits.
     TCounterValRegHigh = 0x2E,
+    /// Timer value lower 8 bits.
     TCounterValRegLow = 0x2F,
-    // Reserved = 0x30,
+    /// General test signal configuration.
     TestSel1Reg = 0x31,
+    /// General test signal configuration and PRBS control.
     TestSel2Reg = 0x32,
+    /// Enables the test bus pin output driver.
     TestPinEnReg = 0x33,
+    /// Defines the HIGH and LOW values for the test port D1 to D7 when it is used as I/O.
     TestPinValueReg = 0x34,
+    /// Shows the status of the internal test bus.
     TestBusReg = 0x35,
+    /// Controls the digital self-test.
     AutoTestReg = 0x36,
+    /// Shows the MFRC522 software version.
     VersionReg = 0x37,
+    /// Determines the analog output test signal at, and status of, pins AUX1 and AUX2.
     AnalogTestReg = 0x38,
+    /// Defines the test value for TestDAC1.
     TestDAC1Reg = 0x39,
+    /// Defines the test value for TestDAC2.
     TestDAC2Reg = 0x3A,
+    /// Shows the values of ADC I and Q channels.
     TestADCReg = 0x3B,
-    // Reserved = 0x3C-0x3F,
 }
 
 impl From<Register> for u8 {
