@@ -198,3 +198,7 @@ pub const WR_ERR: u8 = 1 << 7;
 /// FIFOLevelReg: clears the internal FIFO buffer’s read and write pointer
 /// and ErrorReg register’s BufferOvfl bit
 pub const FLUSH_BUFFER: u8 = 1 << 7;
+
+/// TxASKReg: forces a 100 % ASK modulation independent of the ModGsPReg
+/// register setting
+pub const FORCE_100_ASK: u8 = 1 << 6;

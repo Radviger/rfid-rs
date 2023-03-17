@@ -169,18 +169,27 @@ where
         self.reset()?;
         self.write(Register::TxModeReg, 0x00)?;
         self.write(Register::RxModeReg, 0x00)?;
-        // Reset ModWidthReg
+        // Reset ModWidthReg to default value
         self.write(Register::ModWidthReg, 0x26)?;
-        // When communicating with a PICC we need a timeout if something goes wrong.
-        // f_timer = 13.56 MHz / (2*TPreScaler+1) where TPreScaler = [TPrescaler_Hi:TPrescaler_Lo].
-        // TPrescaler_Hi are the four low bits in TModeReg. TPrescaler_Lo is TPrescalerReg.
-        self.write(Register::TModeReg, 0x80)?; // TAuto=1; timer starts automatically at the end of the transmission in all communication modes at all speeds
-        self.write(Register::TPrescalerReg, 0xA9)?; // TPreScaler = TModeReg[3..0]:TPrescalerReg, ie 0x0A9 = 169 => f_timer=40kHz, ie a timer period of 25μs.
-        self.write(Register::TReloadRegHigh, 0x03)?; // Reload timer with 0x3E8 = 1000, ie 25ms before timeout.
+
+        // Configure the timer, so we can get a timeout if something goes wrong
+        // when communicating with a PICC:
+        // - Set timer to start automatically at the end of the transmission
+        self.write(Register::TModeReg, 0x80)?;
+        // - Configure the prescaler to determine the timer frequency:
+        //   f_timer = 13.56 MHz / (2 * TPreScaler + 1)
+        //   so for 40kHz frequency (25μs period), TPreScaler = 0x0A9
+        self.write(Register::TPrescalerReg, 0xA9)?;
+        // - Set the reload value to determine the timeout
+        //   for a 25ms timeout, we need a value of 1000 = 0x3E8
+        self.write(Register::TReloadRegHigh, 0x03)?;
         self.write(Register::TReloadRegLow, 0xE8)?;
-        self.write(Register::TxASKReg, 0x40)?; // Default 0x00. Force a 100 % ASK modulation independent of the ModGsPReg register setting
-                                               // Default 0x3F. Set the preset value for the CRC coprocessor for the CalcCRC command to 0x6363 (ISO 14443-3 part 6.2.4)
+
+        // TODO: may not be necessary?
+        self.write(Register::TxASKReg, FORCE_100_ASK)?;
+        // Set preset value of CRC coprocessor according to ISO 14443-3 part 6.2.4
         self.write(Register::ModeReg, (0x3f & (!0b11)) | 0b01)?;
+        // Enable antenna
         self.rmw(Register::TxControlReg, |b| b | 0b11)?;
 
         Ok(Mfrc522 {
@@ -234,7 +243,7 @@ where
         //   If the PICC responds with any modulation during a period of 1 ms
         //   after the end of the frame containing the HLTA command,
         //   this response shall be interpreted as 'not acknowledge'.
-        // We interpret that this way: Only Error::Timeout is a success.
+        // We interpret that this way: only Error::Timeout is a success.
         match self.transceive::<0>(&buffer, 0, 0) {
             Err(Error::Timeout) => Ok(()),
             Ok(_) => Err(Error::Nak),
@@ -599,10 +608,12 @@ where
         })
     }
 
+    /// Request to execute the given command
     fn command(&mut self, command: Command) -> Result<(), E> {
         self.write(Register::CommandReg, command.into())
     }
 
+    /// Perform a software reset
     fn reset(&mut self) -> Result<(), E> {
         self.command(Command::SoftReset)?;
         while self.read(Register::CommandReg)? & POWER_DOWN != 0 {}
@@ -614,6 +625,7 @@ where
     }
 
     // lowest level API
+
     fn read(&mut self, reg: Register) -> Result<u8, E> {
         let mut buffer = [reg.read_address(), 0];
 
