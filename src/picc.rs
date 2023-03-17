@@ -18,10 +18,10 @@
 pub enum Command {
     /// REQuest command, Type A. invites PICCs in state IDLE to go to READY\
     /// and prepare for anticollision or selection. 7 bit frame.
-    REQA = 0x26,
+    ReqA = 0x26,
     /// Wake-UP command, Type A. invites PICCs in state IDLE and HALT to go to READY(*)\
     /// and prepare for anticollision or selection. 7 bit frame.
-    WUPA = 0x52,
+    WupA = 0x52,
     /// Cascade Tag. Not really a command, but used during anti collision.
     CT = 0x88,
     /// Anti collision/Select, Cascade Level 1
@@ -31,9 +31,9 @@ pub enum Command {
     /// Anti collision/Select, Cascade Level 3
     SelCl3 = 0x97,
     /// HaLT command, Type A. Instructs an ACTIVE PICC to go to state HALT.
-    HLTA = 0x50,
-    /// Request command for Answer To Reset.
-    RATS = 0xE0,
+    HltA = 0x50,
+    /// Request command for Answer To Select.
+    RAtS = 0xE0,
     /// Perform authentication with Key A
     MfAuthKeyA = 0x60,
     /// Perform authentication with Key B

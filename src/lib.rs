@@ -65,14 +65,19 @@ impl<const T: usize> GenericUid<T> {
     }
 }
 
-/// Answer To reQuest A
+/// Answer To reQuest type A
 pub struct AtqA {
     bytes: [u8; 2],
 }
 
+/// Implemented by the different states of the MFRC522 driver.
+///
+/// This trait cannot be implemented outside of this crate.
 pub trait State: Sealed {}
 
+/// The MFRC522 driver starts in this state and needs to be initialized before it can be used.
 pub enum Uninitialized {}
+/// The MFRC522 driver is ready for use.
 pub enum Initialized {}
 
 impl State for Uninitialized {}
@@ -194,9 +199,9 @@ where
     Mfrc522<SPI, NSS, D, Initialized>: WithNssDelay,
 {
     /// Sends a REQuest type A to nearby PICCs
-    pub fn reqa<'b>(&mut self) -> Result<AtqA, Error<E>> {
+    pub fn reqa(&mut self) -> Result<AtqA, Error<E>> {
         // NOTE REQA is a short frame (7 bits)
-        let fifo_data = self.transceive(&[picc::Command::REQA as u8], 7, 0)?;
+        let fifo_data = self.transceive(&[picc::Command::ReqA as u8], 7, 0)?;
         if fifo_data.valid_bytes != 2 || fifo_data.valid_bits != 0 {
             Err(Error::IncompleteFrame)
         } else {
@@ -207,9 +212,9 @@ where
     }
 
     /// Sends a Wake UP type A to nearby PICCs
-    pub fn wupa<'b>(&mut self) -> Result<AtqA, Error<E>> {
+    pub fn wupa(&mut self) -> Result<AtqA, Error<E>> {
         // NOTE WUPA is a short frame (7 bits)
-        let fifo_data = self.transceive(&[picc::Command::WUPA as u8], 7, 0)?;
+        let fifo_data = self.transceive(&[picc::Command::WupA as u8], 7, 0)?;
         if fifo_data.valid_bytes != 2 || fifo_data.valid_bits != 0 {
             Err(Error::IncompleteFrame)
         } else {
@@ -221,7 +226,7 @@ where
 
     /// Sends command to enter HALT state
     pub fn hlta(&mut self) -> Result<(), Error<E>> {
-        let mut buffer: [u8; 4] = [picc::Command::HLTA as u8, 0, 0, 0];
+        let mut buffer: [u8; 4] = [picc::Command::HltA as u8, 0, 0, 0];
         let crc = self.calculate_crc(&buffer[..2])?;
         buffer[2..].copy_from_slice(&crc);
 
@@ -238,7 +243,7 @@ where
     }
 
     /// Selects a PICC in the READY state
-    // TODO add optional UID to select an specific PICC
+    // TODO add optional UID to select a specific PICC
     pub fn select(&mut self, atqa: &AtqA) -> Result<Uid, Error<E>> {
         // check for proprietary anticollision
         if (atqa.bytes[0] & 0b00011111).count_ones() != 1 {
@@ -323,7 +328,7 @@ where
             let sak = picc::Sak::from(rx.buffer[0]);
             let crc_a = &rx.buffer[1..];
             let crc_verify = self.calculate_crc(&rx.buffer[..1])?;
-            if crc_a != &crc_verify {
+            if crc_a != crc_verify {
                 return Err(Error::Crc);
             }
 
@@ -416,7 +421,7 @@ where
 
         // verify CRC
         let crc = self.calculate_crc(&rx[..16])?;
-        if &crc != &rx[16..] {
+        if crc != rx[16..] {
             return Err(Error::Crc);
         }
         Ok(rx[..16].try_into().unwrap())
@@ -443,7 +448,7 @@ where
         Ok(())
     }
 
-    /// Returns the version of the MFRC522
+    /// Returns the version reported by the MFRC522
     pub fn version(&mut self) -> Result<u8, Error<E>> {
         self.read(Register::VersionReg).map_err(Error::Spi)
     }
@@ -480,7 +485,7 @@ where
 
         self.command(Command::CalcCRC).map_err(Error::Spi)?;
 
-        // Wait for the CRC calculation to complete. Each iteration of the while-loop takes 17.73us.
+        // Wait for the CRC calculation to complete.
         let mut irq;
         for _ in 0..5000 {
             irq = self.read(Register::DivIrqReg).map_err(Error::Spi)?;
@@ -608,7 +613,7 @@ where
 
     fn reset(&mut self) -> Result<(), E> {
         self.command(Command::SoftReset)?;
-        while self.read(Register::CommandReg)? & (1 << 4) != 0 {}
+        while self.read(Register::CommandReg)? & POWER_DOWN != 0 {}
         Ok(())
     }
 
@@ -616,7 +621,7 @@ where
         self.write(Register::FIFOLevelReg, 1 << 7)
     }
 
-    // lowest level  API
+    // lowest level API
     fn read(&mut self, reg: Register) -> Result<u8, E> {
         let mut buffer = [reg.read_address(), 0];
 
@@ -768,7 +773,7 @@ impl<const L: usize> FifoData<L> {
 
         let dst_valid_bytes = dst_valid_bits / 8;
         let dst_valid_last_bits = dst_valid_bits % 8;
-        let mask: u8 = (0xFF << dst_valid_last_bits) & 0xFF;
+        let mask: u8 = 0xFF << dst_valid_last_bits;
         let mut idx = dst_valid_bytes as usize;
         dst[idx] = (self.buffer[0] & mask) | (dst[idx] & !mask);
         idx += 1;
