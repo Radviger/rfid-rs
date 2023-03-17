@@ -504,14 +504,6 @@ where
     }
 
     fn check_error_register(&mut self) -> Result<(), Error<E>> {
-        const PROTOCOL_ERR: u8 = 1 << 0;
-        const PARITY_ERR: u8 = 1 << 1;
-        const CRC_ERR: u8 = 1 << 2;
-        const COLL_ERR: u8 = 1 << 3;
-        const BUFFER_OVFL: u8 = 1 << 4;
-        const TEMP_ERR: u8 = 1 << 6;
-        const WR_ERR: u8 = 1 << 7;
-
         let err = self.read(Register::ErrorReg).map_err(Error::Spi)?;
 
         if err & PROTOCOL_ERR != 0 {
@@ -618,7 +610,7 @@ where
     }
 
     fn flush_fifo_buffer(&mut self) -> Result<(), E> {
-        self.write(Register::FIFOLevelReg, 1 << 7)
+        self.write(Register::FIFOLevelReg, FLUSH_BUFFER)
     }
 
     // lowest level API

@@ -175,3 +175,26 @@ pub const RX_IRQ: u8 = 1 << 5;
 
 /// DivIrqReg: CalcCRC command is active and all data is processed
 pub const CRC_IRQ: u8 = 1 << 2;
+
+/// ErrorReg: set to logic 1 if the SOF is incorrect
+pub const PROTOCOL_ERR: u8 = 1 << 0;
+/// ErrorReg: parity check failed
+pub const PARITY_ERR: u8 = 1 << 1;
+/// ErrorReg: the RxModeReg register’s RxCRCEn bit is set and the CRC calculation fails
+pub const CRC_ERR: u8 = 1 << 2;
+/// ErrorReg: a bit-collision is detected
+pub const COLL_ERR: u8 = 1 << 3;
+/// ErrorReg: the host or a MFRC522’s internal state machine (e.g. receiver) tries to
+/// write data to the FIFO buffer even though it is already full
+pub const BUFFER_OVFL: u8 = 1 << 4;
+/// ErrorReg: internal temperature sensor detects overheating
+pub const TEMP_ERR: u8 = 1 << 6;
+/// ErrorReg: data is written into the FIFO buffer by the host during the MFAuthent
+/// command or if data is written into the FIFO buffer by the host during the
+/// time between sending the last bit on the RF interface and receiving the
+/// last bit on the RF interface
+pub const WR_ERR: u8 = 1 << 7;
+
+/// FIFOLevelReg: clears the internal FIFO buffer’s read and write pointer
+/// and ErrorReg register’s BufferOvfl bit
+pub const FLUSH_BUFFER: u8 = 1 << 7;
