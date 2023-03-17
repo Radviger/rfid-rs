@@ -2,6 +2,7 @@
 
 pub mod error;
 mod picc;
+mod register;
 mod util;
 
 use embedded_hal as hal;
@@ -11,116 +12,12 @@ use hal::digital::v2::OutputPin;
 use heapless::Vec;
 
 use error::Error;
+use register::*;
 use util::{DummyDelay, DummyNSS, Sealed};
 
-/// Registers in the MFRC522, the Proximity Coupling Device (PCD) used here.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
-#[repr(u8)]
-enum Register {
-    // Reserved = 0x00,
-    CommandReg = 0x01,
-    ComlEnReg = 0x02,
-    DivlEnReg = 0x03,
-    ComIrqReg = 0x04,
-    DivIrqReg = 0x05,
-    ErrorReg = 0x06,
-    Status1Reg = 0x07,
-    Status2Reg = 0x08,
-    FIFODataReg = 0x09,
-    FIFOLevelReg = 0x0A,
-    WaterLevelReg = 0x0B,
-    ControlReg = 0x0C,
-    BitFramingReg = 0x0D,
-    CollReg = 0x0E,
-    // Reserved = 0x0F,
-    // Reserved = 0x10,
-    ModeReg = 0x11,
-    TxModeReg = 0x12,
-    RxModeReg = 0x13,
-    TxControlReg = 0x14,
-    TxASKReg = 0x15,
-    TxSelReg = 0x16,
-    RxSelReg = 0x17,
-    RxThresholdReg = 0x18,
-    DemodReg = 0x19,
-    // Reserved = 0x1A,
-    // Reserved = 0x1B,
-    MfTxReg = 0x1C,
-    MfRxReg = 0x1D,
-    // Reserved = 0x1E,
-    SerialSpeedReg = 0x1F,
-    // Reserved = 0x20,
-    CRCResultRegHigh = 0x21,
-    CRCResultRegLow = 0x22,
-    // Reserved = 0x23,
-    ModWidthReg = 0x24,
-    // Reserved = 0x25,
-    RFCfgReg = 0x26,
-    GsNReg = 0x27,
-    CWGsPReg = 0x28,
-    ModGsPReg = 0x29,
-    TModeReg = 0x2A,
-    TPrescalerReg = 0x2B,
-    TReloadRegHigh = 0x2C,
-    TReloadRegLow = 0x2D,
-    TCounterValRegHigh = 0x2E,
-    TCounterValRegLow = 0x2F,
-    // Reserved = 0x30,
-    TestSel1Reg = 0x31,
-    TestSel2Reg = 0x32,
-    TestPinEnReg = 0x33,
-    TestPinValueReg = 0x34,
-    TestBusReg = 0x35,
-    AutoTestReg = 0x36,
-    VersionReg = 0x37,
-    AnalogTestReg = 0x38,
-    TestDAC1Reg = 0x39,
-    TestDAC2Reg = 0x3A,
-    TestADCReg = 0x3B,
-    // Reserved = 0x3C-0x3F,
-}
-impl From<Register> for u8 {
-    #[inline(always)]
-    fn from(variant: Register) -> Self {
-        variant as _
-    }
-}
-
-const R: u8 = 1 << 7;
-const W: u8 = 0 << 7;
-
-impl Register {
-    fn read_address(&self) -> u8 {
-        ((*self as u8) << 1) | R
-    }
-
-    fn write_address(&self) -> u8 {
-        ((*self as u8) << 1) | W
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[repr(u8)]
-enum Command {
-    Idle = 0b0000,
-    Mem = 0b0001,
-    GenerateRandomId = 0b0010,
-    CalcCRC = 0b0011,
-    Transmit = 0b0100,
-    NoCmdChange = 0b0111,
-    Receive = 0b1000,
-    Transceive = 0b1100,
-    MFAuthent = 0b1110,
-    SoftReset = 0b1111,
-}
-impl From<Command> for u8 {
-    #[inline(always)]
-    fn from(variant: Command) -> Self {
-        variant as _
-    }
-}
+const MIFARE_ACK: u8 = 0xA;
+const MIFARE_KEYSIZE: usize = 6;
+pub type MifareKey = [u8; MIFARE_KEYSIZE];
 
 pub enum Uid {
     /// Single sized UID, 4 bytes long
@@ -173,11 +70,6 @@ pub struct AtqA {
     bytes: [u8; 2],
 }
 
-const MIFARE_ACK: u8 = 0xA;
-
-const MIFARE_KEYSIZE: usize = 6;
-pub type MifareKey = [u8; MIFARE_KEYSIZE];
-
 pub trait State: Sealed {}
 
 pub enum Uninitialized {}
@@ -195,13 +87,6 @@ pub struct Mfrc522<SPI, NSS, D, S: State> {
     delay: D,
     state: core::marker::PhantomData<S>,
 }
-
-const ERR_IRQ: u8 = 1 << 1;
-const IDLE_IRQ: u8 = 1 << 4;
-const RX_IRQ: u8 = 1 << 5;
-const TIMER_IRQ: u8 = 1 << 0;
-
-const CRC_IRQ: u8 = 1 << 2;
 
 impl<E, SPI> Mfrc522<SPI, DummyNSS, DummyDelay, Uninitialized>
 where
