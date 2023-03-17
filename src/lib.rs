@@ -386,7 +386,7 @@ where
         // clear all interrupt flags
         self.write(Register::ComIrqReg, 0x7f).map_err(Error::Spi)?;
         // flush FIFO buffer
-        self.flush_fifo_buffer().map_err(Error::Spi)?;
+        self.fifo_flush().map_err(Error::Spi)?;
         // clear bit framing
         self.write(Register::BitFramingReg, 0).map_err(Error::Spi)?;
 
@@ -487,7 +487,7 @@ where
             .map_err(Error::Spi)?;
 
         // flush FIFO buffer
-        self.flush_fifo_buffer().map_err(Error::Spi)?;
+        self.fifo_flush().map_err(Error::Spi)?;
 
         // write data to transmit to the FIFO buffer
         self.write_many(Register::FIFODataReg, data)?;
@@ -554,7 +554,7 @@ where
         self.write(Register::ComIrqReg, 0x7f).map_err(Error::Spi)?;
 
         // flush FIFO buffer
-        self.flush_fifo_buffer().map_err(Error::Spi)?;
+        self.fifo_flush().map_err(Error::Spi)?;
 
         // write data to transmit to the FIFO buffer
         self.write_many(Register::FIFODataReg, tx_buffer)?;
@@ -585,6 +585,7 @@ where
         self.fifo_data()
     }
 
+    /// Get the data from the internal FIFO buffer
     fn fifo_data<const RX: usize>(&mut self) -> Result<FifoData<RX>, Error<E>> {
         let mut buffer = [0u8; RX];
         let mut valid_bytes = 0;
@@ -608,6 +609,11 @@ where
         })
     }
 
+    /// Flush the internal FIFO buffer
+    fn fifo_flush(&mut self) -> Result<(), E> {
+        self.write(Register::FIFOLevelReg, FLUSH_BUFFER)
+    }
+
     /// Request to execute the given command
     fn command(&mut self, command: Command) -> Result<(), E> {
         self.write(Register::CommandReg, command.into())
@@ -618,10 +624,6 @@ where
         self.command(Command::SoftReset)?;
         while self.read(Register::CommandReg)? & POWER_DOWN != 0 {}
         Ok(())
-    }
-
-    fn flush_fifo_buffer(&mut self) -> Result<(), E> {
-        self.write(Register::FIFOLevelReg, FLUSH_BUFFER)
     }
 
     // lowest level API
