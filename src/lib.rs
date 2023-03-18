@@ -1,3 +1,38 @@
+//! Driver library for interfacing with the MFRC522 contacless communication IC,
+//! based on the [embedded-hal](https://docs.rs/embedded-hal/latest/embedded_hal/) traits.
+//!
+//! The MFRC522 is a *Proximity Coupling Device* (PCD) and communicates with a
+//! *Proximity Integrated Circuit Card* (PICC).
+//! The main purpose of the MFRC522 is to give the connected device
+//! (where we're running this driver) the ability to read and write data from/to the card.
+//!
+//! The MFRC522 supports 3 communication interfaces:
+//! - SPI
+//! - I2C
+//! - UART
+//!
+//! However, currently only SPI communication is implemented in this crate.
+//!
+//! # Quickstart
+//! ```rust
+//! // create an SPI device that implements the embedded-hal `spi::Transfer` and `spi::Write` traits
+//! let spi = spi::Spi::new(/* */);
+//! // create a GPIO output for chip-select control
+//! let cs = gpio::Output::new(/* */);
+//! let mut mfrc522 = Mfrc522::new(spi).with_nss(cs).init()?;
+//!
+//! // The reported version is expected to be 0x91 or 0x92
+//! let mfrc522_version = mfrc522.version()?;
+//! ```
+//!
+//! Take a look at [Mfrc522] for information on the available functions.
+//!
+//! # Example applications
+//!
+//! - [Raspberry Pi 4](https://gitlab.com/jspngh/rfid-rs/-/blob/master/examples/rpi.rs)
+//! - [Beaglebone Black](https://gitlab.com/jspngh/rfid-rs/-/blob/master/examples/beagle.rs)
+//! - [STM32L4](https://gitlab.com/jspngh/stm32l4-mfrc522)
+
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod error;
@@ -103,6 +138,10 @@ where
     /// actual chip-select to be controlled by hardware.
     ///
     /// Use the [with_nss](Mfrc522::with_nss) method to add a software controlled NSS pin.
+    ///
+    /// If you are using optimization / release mode, you may want to add a delay function
+    /// using the [with_delay](Mfrc522::with_delay) method to ensure timing requirements are
+    /// respected.
     pub fn new(spi: SPI) -> Mfrc522<SPI, DummyNSS, DummyDelay, Uninitialized> {
         Mfrc522 {
             spi,

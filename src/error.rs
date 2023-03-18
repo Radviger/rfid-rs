@@ -23,7 +23,7 @@ pub enum Error<E> {
     Spi(E),
     /// Timeout
     Timeout,
-    /// ???
+    /// Write error: FIFO buffer was written at invalid time
     Wr,
     /// Not acknowledge
     Nak,
