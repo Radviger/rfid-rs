@@ -19,13 +19,17 @@
 //! let spi = spi::Spi::new(/* */);
 //! // create a GPIO output for chip-select control
 //! let cs = gpio::Output::new(/* */);
-//! let mut mfrc522 = Mfrc522::new(spi).with_nss(cs).init()?;
+//!
+//! let itf = SpiInterface::new(spi).with_nss(cs);
+//! let mut mfrc522 = Mfrc522::new(itf).init()?;
 //!
 //! // The reported version is expected to be 0x91 or 0x92
 //! let mfrc522_version = mfrc522.version()?;
 //! ```
 //!
-//! Take a look at [Mfrc522] for information on the available functions.
+//! Take a look at [SpiInterface](comm::blocking::spi::SpiInterface) for options when creating
+//! the communication interface, and [Mfrc522] for information on the functions
+//! that are available after initialization.
 //!
 //! # Example applications
 //!
