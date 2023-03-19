@@ -23,7 +23,8 @@ use embedded_hal::digital::v2::OutputPin;
 use hal::spidev::{SpiModeFlags, SpidevOptions};
 use hal::sysfs_gpio::Direction;
 use hal::{Delay, Pin, Spidev};
-use mfrc522::{Mfrc522, Initialized, WithNssDelay};
+use mfrc522::{Mfrc522, Initialized};
+use mfrc522::comm::{Interface, blocking::spi::SpiInterface};
 
 // NOTE this requires tweaking permissions and configuring LED0
 //
@@ -67,12 +68,13 @@ fn main() -> Result<()> {
     let pin = Pin::new(22);
     pin.export().unwrap();
     while !pin.is_exported() {}
-    delay.delay_ms(1u32); // delay sometimes necessary because `is_exported()` returns to early?
+    delay.delay_ms(1u32); // delay sometimes necessary because `is_exported()` returns too early?
     pin.set_direction(Direction::Out).unwrap();
     pin.set_value(1).unwrap();
 
     // The `with_nss` method provides a GPIO pin to the driver for software controlled chip select.
-    let mut mfrc522 = Mfrc522::new(spi).with_nss(pin).init()?;
+    let itf = SpiInterface::new(spi).with_nss(pin);
+    let mut mfrc522 = Mfrc522::new(itf).init()?;
 
     let vers = mfrc522.version()?;
 
@@ -109,15 +111,13 @@ fn main() -> Result<()> {
     }
 }
 
-fn handle_authenticate<E, SPI, NSS, D, F>(
-    mfrc522: &mut Mfrc522<SPI, NSS, D, Initialized>,
+fn handle_authenticate<E, COMM: Interface<Error = E>, F>(
+    mfrc522: &mut Mfrc522<COMM, Initialized>,
     uid: &mfrc522::Uid,
     action: F,
 ) -> Result<()>
 where
-    SPI: SpiTransfer<u8, Error = E> + SpiWrite<u8, Error = E>,
-    Mfrc522<SPI, NSS, D, Initialized>: WithNssDelay,
-    F: FnOnce(&mut Mfrc522<SPI, NSS, D, Initialized>) -> Result<()>,
+    F: FnOnce(&mut Mfrc522<COMM, Initialized>) -> Result<()>,
     E: std::fmt::Debug + std::marker::Sync + std::marker::Send + 'static,
 {
     // Use *default* key, this should work on new/empty cards
