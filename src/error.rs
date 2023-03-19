@@ -11,24 +11,24 @@ pub enum Error<E> {
     Crc,
     /// Incomplete RX frame
     IncompleteFrame,
-    /// Provided buffer not large enough
-    NoRoom,
     /// Internal temperature sensor detects overheating
     Overheating,
     /// Parity check failed
     Parity,
     /// Error during MFAuthent operation
     Protocol,
-    /// SPI bus error
-    Spi(E),
     /// Timeout
     Timeout,
     /// Write error: FIFO buffer was written at invalid time
     Wr,
     /// Not acknowledge
     Nak,
+    /// Provided buffer not large enough
+    NoRoom,
     /// Proprietary frames, commands or protocols used
     Proprietary,
+    /// Communication error on the underlying interface
+    Comm(E),
 }
 
 #[cfg(feature = "std")]

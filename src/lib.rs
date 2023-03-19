@@ -35,22 +35,17 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+pub mod comm;
 pub mod error;
 mod picc;
 mod register;
 mod util;
 
-use embedded_hal as hal;
-use hal::blocking::spi;
-use hal::digital::v2::OutputPin;
-
-use heapless::Vec;
-
+use comm::Interface;
 use error::Error;
 use register::*;
-use util::{DummyDelay, DummyNSS, Sealed};
+use util::Sealed;
 
-const MIFARE_ACK: u8 = 0xA;
 const MIFARE_KEYSIZE: usize = 6;
 pub type MifareKey = [u8; MIFARE_KEYSIZE];
 
@@ -121,90 +116,34 @@ impl Sealed for Uninitialized {}
 impl Sealed for Initialized {}
 
 /// MFRC522 driver
-pub struct Mfrc522<SPI, NSS, D, S: State> {
-    spi: SPI,
-    nss: NSS,
-    delay: D,
+pub struct Mfrc522<COMM: Interface, S: State> {
+    comm: COMM,
     state: core::marker::PhantomData<S>,
 }
 
-impl<E, SPI> Mfrc522<SPI, DummyNSS, DummyDelay, Uninitialized>
-where
-    SPI: spi::Transfer<u8, Error = E> + spi::Write<u8, Error = E>,
-{
-    /// Create a new MFRC522 driver from a SPI interface.
-    ///
-    /// The resulting driver will use a *dummy* NSS pin and expects the
-    /// actual chip-select to be controlled by hardware.
-    ///
-    /// Use the [with_nss](Mfrc522::with_nss) method to add a software controlled NSS pin.
-    ///
-    /// If you are using optimization / release mode, you may want to add a delay function
-    /// using the [with_delay](Mfrc522::with_delay) method to ensure timing requirements are
-    /// respected.
-    pub fn new(spi: SPI) -> Mfrc522<SPI, DummyNSS, DummyDelay, Uninitialized> {
-        Mfrc522 {
-            spi,
-            nss: DummyNSS {},
-            delay: DummyDelay {},
+impl<COMM: Interface> Mfrc522<COMM, Uninitialized> {
+    /// Create a new MFRC522 driver from the communication interface.
+    pub fn new(comm: COMM) -> Self {
+        Self {
+            comm,
             state: core::marker::PhantomData,
         }
     }
 }
 
-impl<SPI, D> Mfrc522<SPI, DummyNSS, D, Uninitialized> {
-    /// Add a software controlled chip-select/NSS pin that should be used by this driver
-    /// for the SPI communication.
-    ///
-    /// This is necessary if your hardware does not support hardware controller NSS
-    /// or if it is unavailable to you for some reason.
-    pub fn with_nss<NSS: OutputPin>(self, nss: NSS) -> Mfrc522<SPI, NSS, D, Uninitialized> {
-        Mfrc522 {
-            spi: self.spi,
-            nss,
-            delay: self.delay,
-            state: core::marker::PhantomData,
-        }
-    }
-}
-
-impl<SPI, NSS> Mfrc522<SPI, NSS, DummyDelay, Uninitialized> {
-    /// Add a delay function to be used after each SPI transaction.
-    ///
-    /// The MFRC522 specifies that the NSS pin needs to be high/de-asserted
-    /// for at least 50ns between communications.
-    ///
-    /// If optimizations are enabled, we can run into issues with this timing requirement
-    /// if we do not add a delay between transactions.
-    /// This function allows the user to specify a (platform specific) function
-    /// that will (busy) wait for at least 50ns.
-    pub fn with_delay<D: FnMut()>(self, delay: D) -> Mfrc522<SPI, NSS, D, Uninitialized> {
-        Mfrc522 {
-            spi: self.spi,
-            nss: self.nss,
-            delay,
-            state: core::marker::PhantomData,
-        }
-    }
-}
-
-impl<SPI, NSS, D, S: State> Mfrc522<SPI, NSS, D, S> {
-    /// Release the underlying SPI device and NSS pin
-    pub fn release(self) -> (SPI, NSS) {
-        (self.spi, self.nss)
+impl<COMM: Interface, S: State> Mfrc522<COMM, S> {
+    /// Release the underlying communication channel
+    pub fn release(self) -> COMM {
+        self.comm
     }
 }
 
 // The driver can transition to the `Initialized` state using this function
-impl<E, SPI, NSS, D> Mfrc522<SPI, NSS, D, Uninitialized>
-where
-    SPI: spi::Transfer<u8, Error = E> + spi::Write<u8, Error = E>,
-    Mfrc522<SPI, NSS, D, Uninitialized>: WithNssDelay,
-{
+impl<E, COMM: Interface<Error = E>> Mfrc522<COMM, Uninitialized> {
     /// Initialize the MFRC522.
     ///
     /// This needs to be called before you can do any other operation.
-    pub fn init(mut self) -> Result<Mfrc522<SPI, NSS, D, Initialized>, E> {
+    pub fn init(mut self) -> Result<Mfrc522<COMM, Initialized>, Error<E>> {
         self.reset()?;
         self.write(Register::TxModeReg, 0x00)?;
         self.write(Register::RxModeReg, 0x00)?;
@@ -232,20 +171,14 @@ where
         self.rmw(Register::TxControlReg, |b| b | 0b11)?;
 
         Ok(Mfrc522 {
-            spi: self.spi,
-            nss: self.nss,
-            delay: self.delay,
+            comm: self.comm,
             state: core::marker::PhantomData,
         })
     }
 }
 
 // The public functions can only be used after initializing
-impl<E, SPI, NSS, D> Mfrc522<SPI, NSS, D, Initialized>
-where
-    SPI: spi::Transfer<u8, Error = E> + spi::Write<u8, Error = E>,
-    Mfrc522<SPI, NSS, D, Initialized>: WithNssDelay,
-{
+impl<E, COMM: Interface<Error = E>> Mfrc522<COMM, Initialized> {
     /// Sends a REQuest type A to nearby PICCs
     pub fn reqa(&mut self) -> Result<AtqA, Error<E>> {
         // NOTE REQA is a short frame (7 bits)
@@ -299,8 +232,7 @@ where
         }
 
         // clear `ValuesAfterColl`
-        self.rmw(Register::CollReg, |b| b & !0x80)
-            .map_err(Error::Spi)?;
+        self.rmw(Register::CollReg, |b| b & !0x80)?;
 
         let mut cascade_level: u8 = 0;
         let mut uid_bytes: [u8; 10] = [0u8; 10];
@@ -333,7 +265,7 @@ where
                         break 'anticollision;
                     }
                     Err(Error::Collision) => {
-                        let coll_reg = self.read(Register::CollReg).map_err(Error::Spi)?;
+                        let coll_reg = self.read(Register::CollReg)?;
                         if coll_reg & (1 << 5) != 0 {
                             // CollPosNotValid
                             return Err(Error::Collision);
@@ -411,7 +343,6 @@ where
     /// Must be done after communication with an authenticated PICC
     pub fn stop_crypto1(&mut self) -> Result<(), Error<E>> {
         self.rmw(Register::Status2Reg, |b| b & !0x08)
-            .map_err(Error::Spi)
     }
 
     pub fn mf_authenticate(
@@ -421,13 +352,13 @@ where
         key: &MifareKey,
     ) -> Result<(), Error<E>> {
         // stop any ongoing command
-        self.command(Command::Idle).map_err(Error::Spi)?;
+        self.command(Command::Idle)?;
         // clear all interrupt flags
-        self.write(Register::ComIrqReg, 0x7f).map_err(Error::Spi)?;
+        self.write(Register::ComIrqReg, 0x7f)?;
         // flush FIFO buffer
-        self.fifo_flush().map_err(Error::Spi)?;
+        self.fifo_flush()?;
         // clear bit framing
-        self.write(Register::BitFramingReg, 0).map_err(Error::Spi)?;
+        self.write(Register::BitFramingReg, 0)?;
 
         let mut tx_buffer = [0u8; 12];
         tx_buffer[0] = picc::Command::MfAuthKeyA as u8;
@@ -442,11 +373,11 @@ where
         self.write_many(Register::FIFODataReg, &tx_buffer)?;
 
         // signal command
-        self.command(Command::MFAuthent).map_err(Error::Spi)?;
+        self.command(Command::MFAuthent)?;
 
         let mut irq;
         loop {
-            irq = self.read(Register::ComIrqReg).map_err(Error::Spi)?;
+            irq = self.read(Register::ComIrqReg)?;
 
             if irq & (ERR_IRQ | IDLE_IRQ) != 0 {
                 break;
@@ -498,51 +429,45 @@ where
 
     /// Returns the version reported by the MFRC522
     pub fn version(&mut self) -> Result<u8, Error<E>> {
-        self.read(Register::VersionReg).map_err(Error::Spi)
+        self.read(Register::VersionReg)
     }
 
     pub fn new_card_present(&mut self) -> Result<AtqA, Error<E>> {
-        self.write(Register::TxModeReg, 0x00).map_err(Error::Spi)?;
-        self.write(Register::RxModeReg, 0x00).map_err(Error::Spi)?;
-        self.write(Register::ModWidthReg, 0x26)
-            .map_err(Error::Spi)?;
+        self.write(Register::TxModeReg, 0x00)?;
+        self.write(Register::RxModeReg, 0x00)?;
+        self.write(Register::ModWidthReg, 0x26)?;
 
         self.reqa()
     }
 }
 
 // The private functions are implemented for all states.
-impl<E, SPI, NSS, D, S: State> Mfrc522<SPI, NSS, D, S>
-where
-    SPI: spi::Transfer<u8, Error = E> + spi::Write<u8, Error = E>,
-    Mfrc522<SPI, NSS, D, S>: WithNssDelay,
-{
+impl<E, COMM: Interface<Error = E>, S: State> Mfrc522<COMM, S> {
     fn calculate_crc(&mut self, data: &[u8]) -> Result<[u8; 2], Error<E>> {
         // stop any ongoing command
-        self.command(Command::Idle).map_err(Error::Spi)?;
+        self.command(Command::Idle)?;
 
         // clear the CRC_IRQ interrupt flag
-        self.write(Register::DivIrqReg, 1 << 2)
-            .map_err(Error::Spi)?;
+        self.write(Register::DivIrqReg, 1 << 2)?;
 
         // flush FIFO buffer
-        self.fifo_flush().map_err(Error::Spi)?;
+        self.fifo_flush()?;
 
         // write data to transmit to the FIFO buffer
         self.write_many(Register::FIFODataReg, data)?;
 
-        self.command(Command::CalcCRC).map_err(Error::Spi)?;
+        self.command(Command::CalcCRC)?;
 
         // Wait for the CRC calculation to complete.
         let mut irq;
         for _ in 0..5000 {
-            irq = self.read(Register::DivIrqReg).map_err(Error::Spi)?;
+            irq = self.read(Register::DivIrqReg)?;
 
             if irq & CRC_IRQ != 0 {
-                self.command(Command::Idle).map_err(Error::Spi)?;
+                self.command(Command::Idle)?;
                 let crc = [
-                    self.read(Register::CRCResultRegLow).map_err(Error::Spi)?,
-                    self.read(Register::CRCResultRegHigh).map_err(Error::Spi)?,
+                    self.read(Register::CRCResultRegLow)?,
+                    self.read(Register::CRCResultRegHigh)?,
                 ];
 
                 return Ok(crc);
@@ -552,7 +477,7 @@ where
     }
 
     fn check_error_register(&mut self) -> Result<(), Error<E>> {
-        let err = self.read(Register::ErrorReg).map_err(Error::Spi)?;
+        let err = self.read(Register::ErrorReg)?;
 
         if err & PROTOCOL_ERR != 0 {
             Err(Error::Protocol)
@@ -587,31 +512,30 @@ where
         [u8; RX]: Sized,
     {
         // stop any ongoing command
-        self.command(Command::Idle).map_err(Error::Spi)?;
+        self.command(Command::Idle)?;
 
         // clear all interrupt flags
-        self.write(Register::ComIrqReg, 0x7f).map_err(Error::Spi)?;
+        self.write(Register::ComIrqReg, 0x7f)?;
 
         // flush FIFO buffer
-        self.fifo_flush().map_err(Error::Spi)?;
+        self.fifo_flush()?;
 
         // write data to transmit to the FIFO buffer
         self.write_many(Register::FIFODataReg, tx_buffer)?;
 
         // signal command
-        self.command(Command::Transceive).map_err(Error::Spi)?;
+        self.command(Command::Transceive)?;
 
         // configure short frame and start transmission
         self.write(
             Register::BitFramingReg,
             (1 << 7) | ((rx_align_bits & 0b0111) << 4) | (tx_last_bits & 0b0111),
-        )
-        .map_err(Error::Spi)?;
+        )?;
 
         // TODO timeout when connection to the MFRC522 is lost (?)
         // wait for transmission + reception to complete
         loop {
-            let irq = self.read(Register::ComIrqReg).map_err(Error::Spi)?;
+            let irq = self.read(Register::ComIrqReg)?;
 
             if irq & (RX_IRQ | ERR_IRQ | IDLE_IRQ) != 0 {
                 break;
@@ -631,13 +555,13 @@ where
         let mut valid_bits = 0;
 
         if RX > 0 {
-            valid_bytes = self.read(Register::FIFOLevelReg).map_err(Error::Spi)? as usize;
+            valid_bytes = self.read(Register::FIFOLevelReg)? as usize;
             if valid_bytes > RX {
                 return Err(Error::NoRoom);
             }
             if valid_bytes > 0 {
                 self.read_many(Register::FIFODataReg, &mut buffer[0..valid_bytes])?;
-                valid_bits = (self.read(Register::ControlReg).map_err(Error::Spi)? & 0x07) as usize;
+                valid_bits = (self.read(Register::ControlReg)? & 0x07) as usize;
             }
         }
 
@@ -649,151 +573,45 @@ where
     }
 
     /// Flush the internal FIFO buffer
-    fn fifo_flush(&mut self) -> Result<(), E> {
+    fn fifo_flush(&mut self) -> Result<(), Error<E>> {
         self.write(Register::FIFOLevelReg, FLUSH_BUFFER)
     }
 
     /// Request to execute the given command
-    fn command(&mut self, command: Command) -> Result<(), E> {
+    fn command(&mut self, command: Command) -> Result<(), Error<E>> {
         self.write(Register::CommandReg, command.into())
     }
 
     /// Perform a software reset
-    fn reset(&mut self) -> Result<(), E> {
+    fn reset(&mut self) -> Result<(), Error<E>> {
         self.command(Command::SoftReset)?;
         while self.read(Register::CommandReg)? & POWER_DOWN != 0 {}
         Ok(())
     }
 
-    // lowest level API
+    // Convenience wrappers for the `Interface` methods
 
-    fn read(&mut self, reg: Register) -> Result<u8, E> {
-        let mut buffer = [reg.read_address(), 0];
-
-        self.with_nss_low(|mfr| {
-            let buffer = mfr.spi.transfer(&mut buffer)?;
-
-            Ok(buffer[1])
-        })
+    fn read(&mut self, reg: Register) -> Result<u8, Error<E>> {
+        self.comm.read(reg).map_err(Error::Comm)
     }
 
     fn read_many<'b>(&mut self, reg: Register, buffer: &'b mut [u8]) -> Result<&'b [u8], Error<E>> {
-        let mut vec = Vec::<u8, 65>::new();
-        let n = buffer.len();
-        for _ in 0..n {
-            vec.push(reg.read_address()).map_err(|_| Error::NoRoom)?;
-        }
-        vec.push(0).map_err(|_| Error::NoRoom)?;
-
-        self.with_nss_low(move |mfr| {
-            let res = mfr.spi.transfer(vec.as_mut()).map_err(Error::Spi)?;
-
-            for (idx, slot) in res[1..].iter().enumerate() {
-                if idx >= n {
-                    break;
-                }
-                buffer[idx] = *slot;
-            }
-
-            Ok(&*buffer)
-        })
+        self.comm.read_many(reg, buffer).map_err(Error::Comm)
     }
 
-    fn rmw<F>(&mut self, reg: Register, f: F) -> Result<(), E>
-    where
-        F: FnOnce(u8) -> u8,
-    {
-        let byte = self.read(reg)?;
-        self.write(reg, f(byte))?;
-        Ok(())
-    }
-
-    fn write(&mut self, reg: Register, val: u8) -> Result<(), E> {
-        self.with_nss_low(|mfr| mfr.spi.write(&[reg.write_address(), val]))
+    fn write(&mut self, reg: Register, val: u8) -> Result<(), Error<E>> {
+        self.comm.write(reg, val).map_err(Error::Comm)
     }
 
     fn write_many(&mut self, reg: Register, bytes: &[u8]) -> Result<(), Error<E>> {
-        self.with_nss_low(|mfr| {
-            let mut vec = Vec::<u8, 65>::new();
-            vec.push(reg.write_address()).map_err(|_| Error::NoRoom)?;
-            vec.extend_from_slice(bytes).map_err(|_| Error::NoRoom)?;
-            mfr.spi.write(vec.as_slice()).map_err(Error::Spi)?;
-
-            Ok(())
-        })
+        self.comm.write_many(reg, bytes).map_err(Error::Comm)
     }
-}
 
-/// Temporary trait to allow different implementations in case a NSS pin and/or
-/// a delay function have been added to the Mfrc522.
-/// The entire way of communicating to the chip needs to be refactored,
-/// to also allow an implementation of I2C and UART communication.
-/// When that is tackled, this trait will disappear.
-pub trait WithNssDelay {
-    fn with_nss_low<F, T>(&mut self, f: F) -> T
+    fn rmw<F>(&mut self, reg: Register, f: F) -> Result<(), Error<E>>
     where
-        F: FnOnce(&mut Self) -> T;
-}
-
-#[doc(hidden)]
-impl<SPI, S: State> WithNssDelay for Mfrc522<SPI, DummyNSS, DummyDelay, S> {
-    fn with_nss_low<F, T>(&mut self, f: F) -> T
-    where
-        F: FnOnce(&mut Self) -> T,
+        F: FnOnce(u8) -> u8,
     {
-        f(self)
-    }
-}
-
-#[doc(hidden)]
-impl<SPI, D, S: State> WithNssDelay for Mfrc522<SPI, DummyNSS, D, S>
-where
-    D: FnMut(),
-{
-    fn with_nss_low<F, T>(&mut self, f: F) -> T
-    where
-        F: FnOnce(&mut Self) -> T,
-    {
-        let result = f(self);
-        (self.delay)();
-
-        result
-    }
-}
-
-#[doc(hidden)]
-impl<SPI, NSS, S: State> WithNssDelay for Mfrc522<SPI, NSS, DummyDelay, S>
-where
-    NSS: OutputPin,
-{
-    fn with_nss_low<F, T>(&mut self, f: F) -> T
-    where
-        F: FnOnce(&mut Self) -> T,
-    {
-        self.nss.set_low();
-        let result = f(self);
-        self.nss.set_high();
-
-        result
-    }
-}
-
-#[doc(hidden)]
-impl<SPI, NSS, D, S: State> WithNssDelay for Mfrc522<SPI, NSS, D, S>
-where
-    NSS: OutputPin,
-    D: FnMut(),
-{
-    fn with_nss_low<F, T>(&mut self, f: F) -> T
-    where
-        F: FnOnce(&mut Self) -> T,
-    {
-        self.nss.set_low();
-        let result = f(self);
-        self.nss.set_high();
-        (self.delay)();
-
-        result
+        self.comm.rmw(reg, f).map_err(Error::Comm)
     }
 }
 
