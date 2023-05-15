@@ -96,7 +96,7 @@ fn main() {
                     }
 
                     handle_authenticate(&mut mfrc522, &uid, |m| {
-                        match m.mf_read(1) {
+                        match m.mf_read(1, true) {
                             Ok(data) => {
                                 println!("read {:?}", data);
                             }

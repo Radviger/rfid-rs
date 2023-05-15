@@ -97,7 +97,7 @@ fn main() -> Result<()> {
                 }
 
                 handle_authenticate(&mut mfrc522, &uid, |m| {
-                    let data = m.mf_read(1)?;
+                    let data = m.mf_read(1, true)?;
                     println!("read {:?}", data);
                     Ok(())
                 })

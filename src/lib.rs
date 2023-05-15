@@ -374,6 +374,7 @@ where
             }
 
             let sak = picc::Sak::from(rx.buffer[0]);
+
             let crc_a = &rx.buffer[1..];
             let crc_verify = self.calculate_crc(&rx.buffer[..1])?;
             if crc_a != crc_verify {
@@ -459,7 +460,7 @@ where
         Ok(())
     }
 
-    pub fn mf_read(&mut self, block: u8) -> Result<[u8; 16], Error<E>> {
+    pub fn mf_read(&mut self, block: u8, check_crc: bool) -> Result<[u8; 16], Error<E>> {
         let mut tx = [picc::Command::MfRead as u8, block, 0u8, 0u8];
 
         let crc = self.calculate_crc(&tx[0..2])?;
@@ -467,10 +468,12 @@ where
 
         let rx = self.transceive::<18>(&tx, 0, 0)?.buffer;
 
-        // verify CRC
-        let crc = self.calculate_crc(&rx[..16])?;
-        if crc != rx[16..] {
-            return Err(Error::Crc);
+        if check_crc {
+            // verify CRC
+            let crc = self.calculate_crc(&rx[..16])?;
+            if crc != rx[16..] {
+                return Err(Error::Crc);
+            }
         }
         Ok(rx[..16].try_into().unwrap())
     }
